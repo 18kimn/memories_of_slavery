@@ -1,0 +1,517 @@
+---
+title: "Memories of Slavery in Mass Incarceration"
+subtitle: "A Quantitative Analysis of Carceral Systems in the U.S. South"
+date: "April 20th, 2020"
+output:
+  pdf_document:
+    keep_tex: true
+header-includes:
+   - \usepackage{dcolumn}   
+fig_caption: TRUE
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+library(tigris)
+library(sf)
+library(tidyverse)
+library(rvest)
+library(ggthemes)
+library(rio)
+library(vroom)
+library(broom)
+library(stargazer)
+library(knitr)
+library(car)
+library(leaps)
+library(fastDummies)
+source("http://www.reuningscherer.net/s&ds230/Rfuncs/regJDRS.txt")
+
+opts_chunk$set(echo = F, message = F, warning = F,
+                      tidy.opts=list(strict = T), 
+               tidy = "styler")
+
+```
+
+
+> Slavery and mass imprisonment are genealogically linked and [...] one cannot understand the latter—its timing, composition, and smooth onset as well as the quiet ignorance or acceptance of its deleterious effects on those it affects—without returning to the former as its historic starting point and functional analogue.
+
+> `r tufte::quote_footer('--- Loic Wacquant, *From Slavery to Mass Incarceration* ')`
+
+# Introduction
+
+Scholars and activists like Wacquant have argued for over a century against the strict dichotomization of "slavery" and "freedom." After formal abolition in 1865, "freedom" was not universally granted to slaves; instead, many iterations of carceral systems have restricted freedom in ways America no longer formally recognizes as slavery. From the ghetto, to Jim Crow laws, to exclusion from institutions of power, to the modern prison, the practice of imprisonment and punishment has shifted and transformed. We live now in an age of mass incarceration, one where Black men are six times as likely to be incarcerated and laws are created as part of a racialized project of incarceration. This paper attempts to describe our modern prison as an echo of former plantations, that the age of slavery is the present and not wholly behind us. We use current and historical data to describe relationships between incarceration, slavery, and urbanicity. **We find that counties with high incarceration rates now also had high slave populations in 1860s, a significant result** ***even when accounting for the accompanying high Black population rate.*** **Additionally, prison population rate is highest in rural areas,** mirroring known geographies of plantations. 
+
+For full disclosure, this project is inspired by a feature story on The Pudding called [The Shape of Slavery](https://pudding.cool/2017/01/shape-of-slavery/?fbclid=IwAR1qH_e4QQCjq2kUprxzEhAnrb76izyXHQfc_TBvUzXo6qHOpVqlLHbT8LQ), written by Yale Professor Bill Rankin and reporter Matt Daniels. We provide statistical analysis to supplement their beautiful, beautiful, maps (seriously, check them out). 
+
+# Data
+ 
+All observations in this project are counties from the U.S. South, or all counties in states where slavery was legal in 1860. Variables used in this analysis are below, with abbreviated names in parentheses. 
+
+## Key variables
+
+- **Incarceration rate rate, 2015. (`prison_rate`)** This is the main response variable for our paper, and is defined as residents per 100,000 population in a given county who are currently in prison. 
+- **Black population rate, 2015. (`blackpop`)** The proportion of a county's residents between ages 16 and 64 who are Black. 
+- **Urbanicity, 2015. (`urbanicity`)**  This is a factor variable that describes the "urbanicty" of a county, or how urban a county is. Its values are "rural", "small/mid", "suburban", and "urban."
+- **Slave population rate, 1860. (`slaves`)** This is the main independent variable for our paper, and is defined as the proportion of population that were slaves. Because many states in the North had already abolished slavery by 1860, this limits the analysis to counties in the U.S. South. 
+- **Whether the county has a prison and what type of prison. (`prison_type`)** Could there be some sort of cultural effect that makes prisons themselves increase incarceration rate in a county? To study this, we include a categorical variable indicating whether a county has a prison or not, and what type of prison it is.  
+
+The first four variables were taken from the [Vera Institute's repository of prisons and jails data](https://github.com/vera-institute/incarceration_trends). Their dataset contains granular data by race and gender at the county level over fourty years, but we use only data from 2015 to avoid complications of time-series data. Slave population rate was taken from the U.S. Census in 1860, provided by the team at [IPUMS NHGIS](nhgis.org). `prison_type` was taken from the Prison Policy Initiative's [Correctional Facility Locator](https://www.prisonersofthecensus.org/locator2010/). 
+
+## Additional control variables 
+
+To attenuate and contextualize the main results, additional control variables were added that center around socioeconomic status. 
+
+- **Unemployment rate,** from the Bureau of Labor Statistics' [Local Area Unemployment Statistics Program](https://www.bls.gov/lau). 
+- **Particular matter less than 2.5 $\mu$m in the air,** from the Environmental Protection Agency's [EJSCREEN tool](https://www.epa.gov/ejscreen/download-ejscreen-data). This is a proxy for air quality. 
+- **Median household income,** from the Census Bureau's [Small Area Income and Poverty Estimates(SAIPE) Program](https://www.census.gov/programs-surveys/saipe/technical-documentation.html). 
+- **Rent burden,** from the [Eviction Lab](https://data-downloads.evictionlab.org/) at Princeton. Rent burden is defined as the proportion of income spent on rent. 
+- **Gini coefficient,** taken from the [County Health Rankings](https://www.countyhealthrankings.org/explore-health-rankings/rankings-data-documentation/national-data-documentation-2010-2017) report and originally collected by the U.S. Census Bureau. The Gini coefficient is a measure of economic inequality on a continuous scale from 0 to 1, with higher values indicating greater economic inequality. 
+- **Proportion of single-parent households,** also taken from the County Health Rankings report. 
+
+# Data cleaning
+
+## An important note on syntax and code
+
+Code for this project is extensive because data was integrated from several sources and each one required cleaning. To cut down on length and communicate our results clearly, we suppress nearly all code. 
+
+For readers that do wish to look at my code in the Rmarkdown file, please note that we use the `tidyverse` syntax previewed in SDS230's last class. The `tidyverse` is a collection of pacakges including dplyr and ggplot2 that make life easier in R.  There are enough new functions that it would not make sense to describe each function as it appears, but many of these functions are named intuitively and can be guessed from their names. We also provide extensive comments in the code.
+
+Very importantly for graders, we provide all of the data that we reference in a Github repository. The most important file is labeled "full_dt.csv" and is in the "data" folder. This has all of our cleaned data, assembled from different sources and ready to use. 
+
+## Slavery data
+
+We read in a current counties boundary shapefile. Data from NHGIS was aggregated to one observation per county, and counties in states that only had 0 for slave population (i.e. states that had outlawed slavery by 1860, which were all Northern states) were replaced with `NA` values to be excluded from the analysis. Rates were created by dividing the slave population by the total population of the county. 
+
+```{r}
+fips_shps <- readRDS("data/county shapefile.RDS") %>% 
+  st_as_sf() %>% 
+  mutate(fips = paste0(STATEFP, COUNTYFP)) %>% 
+  select(fips)
+
+#aggregating total slave pop by county
+slaves <- read_csv("data/nhgis0002_ds14_1860_county.csv") %>% 
+  select(GISJOIN, AH0061:AH0090) %>% 
+  pivot_longer( AH0061:AH0090) %>% 
+  group_by(GISJOIN) %>% 
+  summarise(slave_pop = sum(value, na.rm=T))
+#if a state has all 0 for slave_pop, its values should be changed to 0
+state_0s <- slaves %>% 
+  mutate(state = str_sub(GISJOIN, 1,3)) %>% group_by(state) %>% 
+  filter(all(slave_pop == 0)) %>% pull(GISJOIN) 
+slaves <- slaves %>% 
+  mutate(slave_pop = ifelse(GISJOIN %in% state_0s, NA, slave_pop)) 
+#----
+#aggregating and merging in the total population of the county
+slaves <-  read_csv("data/nhgis0002_ds14_1860_county.csv") %>% 
+  pivot_longer( AH0001:AH0180) %>% 
+  group_by(GISJOIN) %>% 
+  summarise(total_pop = sum(value, na.rm=T)) %>% 
+  left_join(slaves, by = "GISJOIN")
+
+```
+
+The most challenging part of data cleaning came from the issue of U.S. counties in 1860 being wildly different from U.S. counties in 2015. These time periods had different identifiers for each county, and we could not find a "crosswalk" online that could link these two together quickly. To address this problem, we took "centroids" in each 1860 county and observed which 2015 counties they resided in. In coding terms, I used the `st_centroid()` and `st_join()` commands in the `sf` package to map counties from these data together. Figure 1 explains this process with Virginia as an example. Code for Figure 1 is suppressed but available in the accompanying Rmarkdown file. 
+
+This is not an optimal solution, and the best way to approach this would have been to take block-level population data to weight overlaps between 1860 and 2015 shapefiles. We considered this too far outside of the scope of the class to be worthwhile to pursue. Figure 1 suggests our method works for the majority of counties.
+
+```{r, echo = F, fig.width = 5, fig.height = 5, fig.cap = "\\label{fig:figs} Diagram of County Overlaps and Changes for Virginia"}
+old <- st_read("data/nhgis/US_county_1860_conflated.shp",
+                   quiet= T) %>%
+  filter(STATENAM == "Georgia") %>% 
+  st_transform(st_crs(fips_shps))
+
+plot <- ggplot(old) + 
+  geom_sf(aes(color = "1860 Boundaries"), fill = NA) + 
+  geom_sf(data = st_centroid(old), aes(color = "1860 Centroids")) + 
+  geom_sf(data = filter(fips_shps, str_sub(fips,1,2) == 13), 
+          aes(color = "2015 Boundaries"), fill = NA) + 
+  theme_map() + 
+  scale_color_manual(values = c("1860 Boundaries" = "blue",
+                                "1860 Centroids" = "red", 
+                                "2015 Boundaries" = "black")) + 
+  theme(legend.position = c(.7,.7), 
+        text = element_text(size = 12)
+        ) + 
+  labs(color = "Legend")
+
+plot
+```
+
+We also aggregated the age- and sex-specific data on Black population rates to one observation per county. 
+
+To summarise, we read in the 1860 county shapefile with `sf::st_read()`, fit the shapefile with the correct projection (i.e. calibrated the longitude-latitute coordinates to rely on the same system as my 2015 counties shapefile), transformed the data to 2015 counties as noted above, joined the shapefile with my dataset by the "GISJOIN" identifier, and aggregated 2015 counties where two or more 1860 counties had fallen into. 
+
+```{r, eval = F}
+slaves <- st_read("data/nhgis/US_county_1860_conflated.shp",
+                   quiet= T) %>% 
+  select(GISJOIN) %>% 
+  right_join(slaves, by = "GISJOIN") %>% 
+  st_centroid() %>% 
+  st_transform(st_crs(fips_shps)) %>% 
+  st_join(fips_shps) %>% 
+  group_by(fips) %>% 
+  summarise(pop_1860 = sum(total_pop, na.rm=T), 
+            slave_pop = sum(slave_pop, na.rm=T)) %>% 
+  mutate(slaves = 100*slave_pop/pop_1860) %>% 
+  select(fips, slaves)
+```
+
+## Other data cleaning of key variables
+
+The Vera dataset is incredibly tidy, with one row for each county in a given year. Minimal data cleaning was needed, and we only filtered for 2015 data, created Black population rate, and selected columns of interest. 
+
+```{r, eval = F}
+vera <- read_csv("data/incarceration_trends.csv") %>% 
+  filter(year == 2015) %>% 
+  mutate(black_poprate =100*black_pop_15to64/total_pop_15to64) %>% 
+  select(fips, urbanicity, prison_rate = total_prison_pop_rate,
+         blackpop = black_poprate) 
+```
+
+`prison_type`, or whether a county has a prison and what type of prison it has, was also fairly easy to obtain from the Prison Policy Initiative's Correctional Facility Locator 2010. We scraped this using the `rvest` package as we saw in class as we could not download it directly. They also did not have 5-digit county identifiers directly on the table, but were embedded in a set of links in each row. We used the `stringr` string manipulation package to pull these identifiers out. Finally, we filtered for only state and federal correctional facilities (otherwise known as "prisons") and aggregated the dataset to have only one row per county instead of one row per prison. 
+
+```{r, eval = F}
+prison_locations <- read_html("https://prisonersofthecensus.org/locator2010/counties/contains-/") 
+prison_fips <- html_nodes(prison_locations, "td:nth-child(3) a") %>% 
+  html_attr("href") %>% 
+  str_extract_all("US([0-9]){5}") %>% str_remove("US") %>% 
+  unlist() 
+
+prison_type <- html_nodes(prison_locations, "td:nth-child(7)") %>% html_text()
+prison_locations <- tibble(fips = prison_fips,
+                               prison_type= prison_type) %>% 
+  filter(prison_type %in% c("Federal", "State")) %>% 
+  group_by(fips) %>% 
+  summarise(prison_type = list(sort(unique(prison_type)))) %>% 
+  mutate(prison_type = case_when(prison_type == "State"~"Has State",
+                              prison_type == 	c("Federal", "State") ~ "Has Both", 
+                              prison_type == "Federal" ~ "Has Federal"))
+```
+
+## Data cleaning of control variables
+
+The control variables were also straightforward to obtain. In general, we changed columns to numeric, removed missing values, joined state and county identifiers to one five-digit identifier, and joined them through the `*._join()` functions from the tidyverse. In one case, we had to write a loop to download a separate file for each state, then used the `bind_rows()` command to assemble them into one dataset. The EPA's data on air pollution (`pm` in my dataset for "particulate matter"), was provided at the tract level, which meant we had to create county-level estimates by combining the tract-level data. 
+
+```{r,eval = F, include = F}
+#unemployment rate: this was taken from the Bureau of Labor Statistics' Local Area Unemployment Statistics at https://www.bls.gov/lau (scroll down to "COUNTY DATA").
+#The rio package is a useful tool to import file types other than .csv -- for example, excel files, .xml files, Stata .dta files, etc. 
+unemp <- rio::import("https://www.bls.gov/lau/laucnty15.xlsx", 
+                 skip = 4) %>% 
+    unite("fips", `Code...2`, `Code...3`, sep = "") %>% #combining state and county FIPS codes
+    select(fips, unemp = `(%)`) %>%  #grabbing relevant columns. A few other related variables are available, but not used here.  
+  filter(fips != "NANA")
+
+## median household income: taken from the Small Area Income and Poverty Estimates (SAIPE) Program. See https://www.census.gov/programs-surveys/saipe/technical-documentation.html for documentation. 
+mhi <- import(
+  "https://www2.census.gov/programs-surveys/saipe/datasets/2015/2015-state-and-county/est15all.xls",
+              skip = 3) %>% 
+    rename(sfips = `State FIPS Code`,
+           cfips = `County FIPS Code`) %>% 
+    #FIPS codes being coded as numeric means leading zeros are chopped off; this adds them back on
+    mutate(sfips = ifelse(nchar(sfips) == 1, paste0("0", sfips), sfips),
+           cfips = case_when(nchar(cfips) == 1 ~ paste0("00", cfips),
+                             nchar(cfips) == 2 ~ paste0("0", cfips),
+                             nchar(cfips) == 3 ~ as.character(cfips))) %>% 
+    unite("fips", sfips, cfips, sep = "") %>% #smash the state FIPS and county FIPS columns together
+    mutate(mhi = as.numeric(`Median Household Income`)) %>% 
+    select(fips, mhi) 
+
+epa15 <- vroom("data/EJSCREEN_20150505.csv", 
+               col_types= cols(pm = "d", pop = "d", .default = "c")) %>% 
+  select(FIPS, pm, pop) %>% mutate(fips = str_sub(FIPS, 1,5)) %>% 
+  group_by(fips) %>% 
+  summarise(pm = weighted.mean(pm, pop, na.rm=TRUE)) 
+
+#Rent burden is taken from the Eviction Lab at Princeton University, specifically from https://data-downloads.evictionlab.org/ . 
+#Other variables are available from the Eviction Lab, but missingness prevents some of the use of other variables (e.g. eviction rates) 
+urls <- paste0('https://eviction-lab-data-downloads.s3.amazonaws.com/', state.abb, '/counties.csv') #state.abb is a base R variable giving state abbreviations 
+rentburd <- map_dfr(urls, function(url){
+  vroom(url, col_types = cols(.default = "c")) %>% 
+    select(fips = GEOID, year, rentburd = `rent-burden`) %>% 
+    mutate(fips = as.character(fips),
+           rentburd = as.numeric(rentburd))
+}) %>% group_by(fips) %>% 
+  filter(year == 2015) %>% select(-year)
+
+
+#finally, % with a college diploma and the Gini coefficient from 2000 are merged in from the County Health Rankings 2010 report, available https://www.countyhealthrankings.org/explore-health-rankings/rankings-data-documentation/national-data-documentation-2010-2017 . 
+chr <- import("data/2010 County Health Rankings National Data.xlsx", 
+              sheet = 2, skip=1, col_types = "text") %>% 
+  select(fips = FIPS, gini = GINI, singpar =  `% Single-Parent Households`) %>% 
+  mutate_at(vars(gini:singpar), as.numeric)
+
+controls <- list(unemp, mhi, epa15, rentburd, chr) %>% 
+  reduce(full_join, by = "fips")
+
+```
+
+## Merging
+
+The five-digit codes that uniquely identified counties allowed us to assign variables from different datasets to the same counties. We dropped spatial attributes because they were no longer needed. We also changed `NA` values for prison_type to "No Prison" to be a more descriptive value (this was only possible once we merged the location data together). 
+
+```{r, eval = F}
+dt <- slaves %>% 
+  st_drop_geometry() %>% 
+  left_join(vera, by = "fips") %>% 
+  left_join(prison_locations, by = "fips") %>% 
+  mutate(prison_type = ifelse(is.na(prison_type), "No Prison", prison_type)) %>% 
+  left_join(controls, by = "fips") 
+```
+
+
+```{r, echo = F, warning = F}
+#I included this chunk and set `eval=F` for all of the chunks above that scrape these data just to cut down on the time it takes to knit the document. 
+#You would get the *exact same result* if you set eval=T above and deleted this chunk. It has no functional purpose other than to save time.
+#write_csv(dt, "data/full_dt.csv")
+dt <- read_csv("data/full_dt.csv")
+```
+
+
+# Descriptive Plots and Summary Information
+
+To restate our questions of interest clearly:
+
+1. Is there an association between 2015 county incarceration rates and 1860 slave population rates? 
+2. If so, is this just because counties with higher slave populations in 1860 now have higher Black populations, and the prison system is more likely to incarcerate Black residents (i.e. not because of a direct "memory" between 1860 and 2015)?^[Note: It could definitely be argued that counties with high slave populations having high incarceratoin rates *only because of high Black populations* is still an effect of the "memory of slavery," but my findings indicate a distinct, though related, "memory" effect.]
+3. If #1 holds, it just because prisons are generally located in isolated areas like rural counties, and prisons have some sort of cultural effect that increases probability of being incarcerated in a given environment? 
+4. (Playing with and off of #3) How does this trend relate to classifications of urbanicity, considering scholars have written about "the urban ghetto" as a carceral system? Are urban counties more likely to have higher incarceration rates? 
+5. What *is* this problem due to, if not completely the things above? 
+
+## Descriptive statistics
+
+To get started exploring these data, here is a glimpse of my continuous variables:^[The `stargazer` package in R was used for formatting.]
+
+```{r, results = "asis"}
+dt %>% select(-fips) %>% 
+  as.data.frame() %>% 
+  stargazer(summary = T, digits = 2, header = F)
+
+```
+
+## Histogram 
+
+A histogram of incarceration rates reveals a unimodal right-skewed distribution. Given a Box-Cox transformation on a preliminary model suggested an exponent of .18 and many dmeographic variables operate on the log scale, I performed a log transformation and removed one outlier (on the lower end). The new logged variable is not completely normally distributed and is a bit left-skewed, but produces normally distributed residuals in the end model. 
+
+```{r, fig.width = 7, fig.height = 4, fig.cap = "\\label{fig:hist} Histogram of Incarceration Rates"}
+
+
+hist1 <- ggplot(dt, aes(x = prison_rate)) + 
+  geom_histogram(fill = "cadetblue3") + 
+  theme_few() + 
+  labs(y = "Number of Counties", x = "Raw Incarceration Rate")
+dt <- dt %>% 
+  mutate(old_prison_rate = prison_rate, 
+         prison_rate = log(prison_rate)) %>% 
+  slice(-which.min(prison_rate))
+
+hist2 <- ggplot(dt, aes(x = prison_rate)) + 
+  geom_histogram(fill = "brown1") + 
+  theme_few() + 
+  labs(y = "Number of Counties", x = "Logged Incarceration Rate")
+
+gridExtra::grid.arrange(hist1, hist2, nrow = 1, top = "Histograms of Raw and Logged Incarceration Rates")
+```
+
+
+## Normal quantile plots
+
+To further emphasize that our raw response variable is not normally distributed and that our transformed response variable is near-but-not-quite normally distributed, we present two normal quantile plots of raw and logged incarceration rates. 
+
+```{r qqplots, fig.width = 7, fig.height = 3.5, fig.cap = "\\label{fig:qqplots} Normal Quantile Plots of Incarceration Rates"}
+par(mfrow = c(1,2))
+
+qq1 <- qqPlot(dt$old_prison_rate, xlab = "Expected Norm Quantiles", ylab = "Raw Incarceration Rate", main = "Raw Incarceration Rate")
+qq1 <- qqPlot(dt$prison_rate, xlab = "Expect Norm Quantiles", ylab = "Logged Incarceration Rate", main = "Logged Incarceration Rate")
+dt$old_prison_rate <- NULL #deleting the old prison rate because it was no longer necessary
+```
+
+## Box plots
+
+To provide a snapshot of our categorical variables, one box plot each for `prison_type` and `urbanicity` are presented with the dependent variable being 2015 incarceration rates. Both sets of boxplots do not reveal large differences in incarceration rates between counties with different prison types and urbanicity settings, but we cannot make any definitive conclusions without further analysis. 
+
+```{r, fig.width = 6, fig.height = 3, fig.cap = "\\label{fig:prison_type_boxplot} Boxplot by Type of Prison"}
+boxplot(prison_rate~prison_type, data =  dt, 
+        main = "Incarceration Rates by Type of Prison",
+        xlab = "Presence and Type of Prison in County", 
+        ylab = "Incarcerated per 1,000 Pop.", 
+        col = "brown1")
+```
+
+
+```{r, fig.width = 6, fig.height = 3, fig.cap = "\\label{fig:urbanicity_boxplot} Boxplot by Urbanicity"}
+boxplot(prison_rate~urbanicity, data =  dt, 
+        main = "Incarceration Rates by Urbanicity of County",
+        xlab = "Urbanicity of County", 
+        ylab = "Incarcerated per 1,000 Pop.", 
+        col = "cadetblue1") 
+```
+
+
+## Matrix plot 
+
+To assess correlation between continuous, we present a matrix plot for all variables using the `pairsJDRS()` command. The labels were hard to read with nine variables, so I manually added text on the top of the graph. It is clear here that some degree of association is present between many of our predictors and the response variable, with some multicolinearity. We will address multicolinearity in the "Conclusions" section. 
+
+```{r, fig.width = 8, fig.height = 8, fig.cap = "\\label{fig:matrix_plot} Matrix Plot of Continuous Variables"}
+
+select(dt, -fips, -prison_type, -urbanicity) %>% 
+  as.data.frame() %>% 
+  pairsJDRS(cex = .03, cex.labels =1)
+
+text(seq(.07, .85, length.out = 9), .98,
+     names(select(dt, -fips, -prison_type, -urbanicity)),
+     xpd=TRUE, adj=c(0,.5), cex=.9)
+
+```
+
+## Correlation test with permuted p-values
+
+Focusing on our two main variables of interest, a traditional correlation test revealed that 2015 incarceration rates and 1860 slave population rates were positively correlated with a coefficient of .365, with an associated p-value of $6.65e-52$ (in other words, extremely small), and a 95% confidence interval of .322 to .407. **A permutation correlation test** with ten million simulations returned a p-value of 0, again indicating that the true p-value is less than $1e-7$. These preliminary results are encouraging pieces of evidence that incarceration rates and slave population rates are associated. 
+
+```{r, eval = F}
+cortest_result <- cor.test(dt$prison_rate, dt$slaves, use = "pairwise.complete.obs")
+cortest_result$p.value
+cortest_result$conf.int
+
+permCor <- function(x, y, plot = T){
+   corResults <- rep(NA, 10000000)
+   for (i in 1:10000000){
+      corResults[i] <- cor(x, sample(y), use = "pairwise.complete.obs")
+   }
+   pval <- mean(abs(corResults) >= abs(cor(x,y, use = "pairwise.complete.obs")), na.rm=T)
+  return(pval)
+}
+
+#to graders -- this next part actually takes an annoyingly long time to run, like ~15 minutes. Beware
+permCor(dt$prison_rate, dt$slaves, plot = F)
+```
+
+
+# Analysis 
+
+To begin, we assert that counties with high rates of incarceration now had high slave population rates in 1860, as evidened with best subsets regression. We find this interesting given that mass incarceration is usually thought to hit urban environments hardest, but areas with high slave population rates were likely rural areas with large plantations. The boxplots above are ambiguous as to how this occurs. To explore this trend, we present an ANOVA result, a traditional t-test with bootstrapped confidence intervals, and a permutation test for urban-rural counties to show differences in incarceration rates across the urban-rural scale. 
+
+## Best subsets regression
+
+We show four models here to show robustness in our results -- that is, seeing the trends of interest across multiple types of models shows that it is not just an artifact of our methods. We present a "base model" with 1860 slave population as the sole predictor, then show two models selected by BIC and adjusted R-squared after a `regsubsets()` regression. The response variable in all models is logged incarceration rate. 
+
+```{r best_subsets, echo = F, include = F}
+dt_mods <- dt[-1] %>% 
+  dummy_cols(ignore_na = T, remove_selected_columns=T)
+best_mod <- regsubsets(prison_rate~., dt_mods, nvmax = 15) %>% 
+  summary()
+#not really a "tidy" way to do this next part -- I get the variables of the model that had the best subsets regression by BIC, 
+mod_nums <- c(
+  which.min(best_mod$bic), 
+  which.max(best_mod$adjr2)
+)
+
+best_mods <- map(mod_nums, function(mod_num){
+  best_mod_vars <- best_mod$which[mod_num,]
+  best_mod_vars <- names(best_mod_vars)[best_mod_vars] 
+  
+  best_mod_vars <- map(names(dt), function(name){
+      str_extract_all(best_mod_vars, name)
+    }) %>% unlist() %>% unique()
+  dt_bestmod <- dt_mods %>% 
+    select(prison_rate, contains(best_mod_vars))
+  lm(prison_rate~., data = dt_bestmod)
+})
+
+```
+
+```{r print_best_subsets, results = "asis"}
+
+stargazer(lm(prison_rate ~ slaves, data = dt), best_mods, 
+          title="Results of Best Subsets Regression", 
+          dep.var.caption = "Model chosen by:",
+          dep.var.labels.include = FALSE,
+          model.numbers = F, 
+          column.labels = c("Base Model", "BIC", "Adj. R2", "Mallow's CP"), 
+          align=TRUE, report = "vc*sp", 
+          header=FALSE, 
+          no.space = TRUE)
+
+
+```
+
+The BIC-selected model shows a highly significant relationship between slave population rate and current prison incarceration rates, with a one-percentage-point increase in slave population rate associated with about a .00721 increase in logged incarceration rates. This corresponds to about a 0.7% multiplicative increase of incarceration rates for a one-percent increase in slave population rate.^[$e^{7.212e-03} = 1.007239 = 0.7\%$ increase. See
+[here](https://stats.idre.ucla.edu/sas/faq/how-can-i-interpret-log-transformed-variables-in-terms-of-percent-change-in-linear-regression/) for further explanation on logged dependent variables and their interpretation.]
+
+Notably, this trend is robust across multiple models -- though the coefficient of "slaves" decreases as we add more variables, slave population rate is significant even as we control for potential mediating variables like the Black population rate, median household income, income inequality with the Gini coefficient, and so on. Though these coefficients are significant as well, seeing slave population rate positively predict incarceration rates in all models suggests a distinct effect between incarceration and slavery.
+
+We verify the BIC-selected model with residual plots. The residuals appear almost perfectly normally distributed^[a trend that I've actually never seen before with these kinds of demographic variables.]. Though there is some heteroskedasticity in the residuals, the extent is mild and within our personal standards of "acceptable heteroskedasticity." 
+
+```{r, fig.width = 7, fig.height = 3, fig.cap = "\\label{fig:residual_plots} Residual plots of BIC-selected model"}
+bic_mod <- lm(prison_rate~ slaves+blackpop + mhi + pm + gini + singpar, data = dt)
+myResPlots2(bic_mod)
+```
+
+## Urban-rural rates of incarceration
+
+Our intuition before we began this analysis held that higher slave population rates are usually associated with rural counties (where plantations were) and high incarceration rates are usually associated with urban areas (at the epicenter of mass incarceration). Off of this idea alone, counties with high slave population rates in 1860 would have lower incarceration rates now. However, our results indicate the opposite. This is made even more intriguing seeing that the model lends suggestive evidence for rural counties having lower incarceration rates than urban counties -- "urbanicity_rural" has a negative coefficient and a p-value of .068, indicating that its incarceration rate is lower than the baseline of "urbanicity_urban." 
+
+To explore this further, we present an ANOVA analysis, a t-test with bootstrapped confidence intervals, and a permutation test. 
+
+### ANOVA
+
+We first present an ANOVA analysis of all urbanicity types and their incarceration rates. From smallest to largest, these are "rural", "small/mid", "suburban", and "urban."
+
+```{r anova, fig.width= 8, fig.height = 5,  fig.cap = "\\label{fig:tukeyanova} ANOVA of Incarceration Rate and Urbanicity, with Tukey Corrections for Confidence Intervals"}
+#mean prison rate by urbanicity
+aov1 <- aov(prison_rate ~ urbanicity, data = dt)
+
+#95% CI -- tried this way just to visualize
+aov_pvalue <- format(tidy(aov1)$p.value[1], scientific = T, digits = 4)
+par(mar = c(5.1, 9, 3.8, 2))
+plot(TukeyHSD(aov1), las=1)
+mtext(paste0("ANOVA p-value for any differences in incarceration rates:", aov_pvalue))
+
+```
+
+This provides evidence that there is some difference in incarceration rates between different sizes of counties, and suburban counties appear to have the lowest incarceration rates. However, the key difference of interest ("urban-rural") does not seem to reveal large differences. 
+
+### t-test and bootstrapped confidence interval 
+
+To drive this point home, we performed a **t-test and created bootstrapped confidence intervals** on just the incarceration rates of rural counties and urban counties. The traditional t-test revealed a 95% confidence interval for the difference between -.0917 and .2368, and the bootstrapped confidence interval revealed a similar range between -.088 and .235. 
+
+Though of course, absence of evidence is not evidence of absence, these results suggest that whatever difference there is in incarceration rates between urban and rural counties exists is not a consistent one and one cannot say that either group has a higher incarceration rate than the other. 
+
+```{r, eval = F}
+attach(dt)
+diffprison <- vector()
+
+for (i in 1:100000) {
+  rural <- sample(prison_rate[urbanicity == "rural"], 
+                  sum(urbanicity == "rural", na.rm=T), replace = T)
+  urban <- sample(prison_rate[urbanicity == "urban"], 
+                  sum(urbanicity == "urban", na.rm=T), replace = T)
+  diffprison[i] <- mean(rural, na.rm=T) - mean(urban, na.rm=T)
+}
+
+ci <- quantile(diffprison, c(0.025, 0.975))
+t.test(prison_rate[urbanicity == "rural"], prison_rate[urbanicity == "urban"], use = "pairwise.complete.obs")
+
+```
+
+
+# Conclusions
+
+## Summary of main results
+
+Our results indicate that slave population rate in 1860 positively predicts incarceration rate in 2015, even when accounting for potential mediating variables like Black population rate and median household income. This points towards a separate (although undeniably related) "memory" of slavery that operates through geography, whereby local townships' penal codes, police forces, and need for capitalist labor creates both slavery and mass incarceration. Wacquant's words in 2002 came before the Vera Institute released their dataset of prison incarceration, and his observation lends a disturbing insight much before numbers could. 
+
+We also find evidence to question the traditional narrative of "mass incarceration" as an "urban issue," given that rural counties do not have significantly different incarceration rates. It could perhaps be that two distinct mechanisms operate in urban environments and rural environments, given that suburban counties in the middle of the urban-rural spectrum do not have these same high incarceration rates; more work is needed to explore this idea. 
+
+## Model assumptions and limitations
+
+Our results have a number of assumptions and limitations. 
+
+- Independent observations
+  - Traditionally, linear regression relies on an "independent observations assumption," or that any given member in a sample studied is not affected by another member of the sample. We acknowledge that this could very well be the case for slavery and mass incarceration, given that many Southern states fought to continue slavery for other Southern states. A high slave population of one county could affect incarceration rates in an adjacent county as well, in a sort of "spillover effect." However, the methods to account for this (fixed-effects analysis and spatial lag models) are outside the scope of this class, and we end with these results not to offer definitive conclusions but encourage further study. 
+- Multicolinearity
+  - Many of our predictors are colinear (i.e. counties with lower median household income may have higher proportions of single-parent households), and we were cautioned that this could distort our conclusions by inflating or deflating the standard errors. However, the fact that the trends of interest appear across all models, no matter how many variables we include or exclude, suggest that these trends exist even if we account for related effects caused by other variables. See [this Piazza post](https://piazza.com/class/k5ch04piask6qk?cid=702) for further inquiry. 
+- Normally-distributed residuals
+  - As we saw above, the residuals for the BIC-selected linear model were perfectly normally distributed. The response variable itself is only "almost" normally distributed, which may cause problems with the ANOVA assumption; however, from class we know ANOVA is fairly robust to small violations of normality and unequal variances. 
+
+Nevertheless, our results are strong evidence that slavery echoes and has effects in the modern day. Despite being one hundred and fifty years after abolition, still the age of "freedom" is yet to come.
