@@ -116,8 +116,8 @@ The most challenging part of data cleaning came from the issue of U.S. counties 
 This is not an optimal solution, and the best way to approach this would have been to take block-level population data to weight overlaps between 1860 and 2015 shapefiles. We considered this too far outside of the scope of the class to be worthwhile to pursue. Figure 1 suggests our method works for the majority of counties.
 
 ```{r, echo = F, fig.width = 5, fig.height = 5, fig.cap = "\\label{fig:figs} Diagram of County Overlaps and Changes for Virginia"}
-old <- st_read("data/nhgis/US_county_1860_conflated.shp",
-                   quiet= T) %>%
+old <-  readRDS("slaves_shp1.RDS") %>% 
+  rbind(readRDS("slaves_shp2.RDS"))%>%
   filter(STATENAM == "Georgia") %>% 
   st_transform(st_crs(fips_shps))
 
@@ -143,9 +143,8 @@ We also aggregated the age- and sex-specific data on Black population rates to o
 To summarise, we read in the 1860 county shapefile with `sf::st_read()`, fit the shapefile with the correct projection (i.e. calibrated the longitude-latitute coordinates to rely on the same system as my 2015 counties shapefile), transformed the data to 2015 counties as noted above, joined the shapefile with my dataset by the "GISJOIN" identifier, and aggregated 2015 counties where two or more 1860 counties had fallen into. 
 
 ```{r, eval = F}
-slaves <- st_read("data/nhgis/US_county_1860_conflated.shp",
-                   quiet= T) %>% 
-  select(GISJOIN) %>% 
+slaves <-  readRDS("slaves_shp1.RDS") %>% 
+  rbind(readRDS("slaves_shp2.RDS")) %>% 
   right_join(slaves, by = "GISJOIN") %>% 
   st_centroid() %>% 
   st_transform(st_crs(fips_shps)) %>% 
@@ -217,7 +216,12 @@ mhi <- import(
     mutate(mhi = as.numeric(`Median Household Income`)) %>% 
     select(fips, mhi) 
 
-epa15 <- vroom("data/EJSCREEN_20150505.csv", 
+#this part takes a really long time because the raw file is so big
+download.file("ftp://newftp.epa.gov/EJSCREEN/2015/EJSCREEN_20150505.csv.zip", 
+              destfile = file)
+unzip(file, exdir= getwd())
+
+epa15 <- vroom("EJSCREEN_20150505.csv", 
                col_types= cols(pm = "d", pop = "d", .default = "c")) %>% 
   select(FIPS, pm, pop) %>% mutate(fips = str_sub(FIPS, 1,5)) %>% 
   group_by(fips) %>% 
