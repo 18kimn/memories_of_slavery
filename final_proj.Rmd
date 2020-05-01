@@ -84,13 +84,13 @@ Very importantly for graders, we provide all of the data that we reference in a 
 We read in a current counties boundary shapefile. Data from NHGIS was aggregated to one observation per county, and counties in states that only had 0 for slave population (i.e. states that had outlawed slavery by 1860, which were all Northern states) were replaced with `NA` values to be excluded from the analysis. Rates were created by dividing the slave population by the total population of the county. 
 
 ```{r}
-fips_shps <- readRDS("data/county shapefile.RDS") %>% 
+fips_shps <- readRDS("county shapefile.RDS") %>% 
   st_as_sf() %>% 
   mutate(fips = paste0(STATEFP, COUNTYFP)) %>% 
   select(fips)
 
 #aggregating total slave pop by county
-slaves <- read_csv("data/nhgis0002_ds14_1860_county.csv") %>% 
+slaves <- read_csv("nhgis0002_ds14_1860_county.csv") %>% 
   select(GISJOIN, AH0061:AH0090) %>% 
   pivot_longer( AH0061:AH0090) %>% 
   group_by(GISJOIN) %>% 
@@ -103,7 +103,7 @@ slaves <- slaves %>%
   mutate(slave_pop = ifelse(GISJOIN %in% state_0s, NA, slave_pop)) 
 #----
 #aggregating and merging in the total population of the county
-slaves <-  read_csv("data/nhgis0002_ds14_1860_county.csv") %>% 
+slaves <-  read_csv("nhgis0002_ds14_1860_county.csv") %>% 
   pivot_longer( AH0001:AH0180) %>% 
   group_by(GISJOIN) %>% 
   summarise(total_pop = sum(value, na.rm=T)) %>% 
@@ -162,7 +162,7 @@ slaves <- st_read("data/nhgis/US_county_1860_conflated.shp",
 The Vera dataset is incredibly tidy, with one row for each county in a given year. Minimal data cleaning was needed, and we only filtered for 2015 data, created Black population rate, and selected columns of interest. 
 
 ```{r, eval = F}
-vera <- read_csv("data/incarceration_trends.csv") %>% 
+vera <- vroom("https://github.com/vera-institute/incarceration_trends/raw/master/incarceration_trends.csv") %>% 
   filter(year == 2015) %>% 
   mutate(black_poprate =100*black_pop_15to64/total_pop_15to64) %>% 
   select(fips, urbanicity, prison_rate = total_prison_pop_rate,
@@ -222,7 +222,7 @@ epa15 <- vroom("data/EJSCREEN_20150505.csv",
   select(FIPS, pm, pop) %>% mutate(fips = str_sub(FIPS, 1,5)) %>% 
   group_by(fips) %>% 
   summarise(pm = weighted.mean(pm, pop, na.rm=TRUE)) 
-
+#ftp://newftp.epa.gov/EJSCREEN/2015/EJSCREEN_20150505.csv.zip
 #Rent burden is taken from the Eviction Lab at Princeton University, specifically from https://data-downloads.evictionlab.org/ . 
 #Other variables are available from the Eviction Lab, but missingness prevents some of the use of other variables (e.g. eviction rates) 
 urls <- paste0('https://eviction-lab-data-downloads.s3.amazonaws.com/', state.abb, '/counties.csv') #state.abb is a base R variable giving state abbreviations 
@@ -264,7 +264,7 @@ dt <- slaves %>%
 #I included this chunk and set `eval=F` for all of the chunks above that scrape these data just to cut down on the time it takes to knit the document. 
 #You would get the *exact same result* if you set eval=T above and deleted this chunk. It has no functional purpose other than to save time.
 #write_csv(dt, "data/full_dt.csv")
-dt <- read_csv("data/full_dt.csv")
+dt <- read_csv("full_dt.csv")
 ```
 
 
