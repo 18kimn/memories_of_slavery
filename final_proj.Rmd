@@ -69,28 +69,33 @@ To attenuate and contextualize the main results, additional control variables we
 - **Gini coefficient,** taken from the [County Health Rankings](https://www.countyhealthrankings.org/explore-health-rankings/rankings-data-documentation/national-data-documentation-2010-2017) report and originally collected by the U.S. Census Bureau. The Gini coefficient is a measure of economic inequality on a continuous scale from 0 to 1, with higher values indicating greater economic inequality. 
 - **Proportion of single-parent households,** also taken from the County Health Rankings report. 
 
-# Data cleaning
 
-## An important note on syntax and code
+# An important note for the graders
 
 Code for this project is extensive because data was integrated from several sources and each one required cleaning. To cut down on length and communicate our results clearly, we suppress nearly all code. 
 
 For readers that do wish to look at my code in the Rmarkdown file, please note that we use the `tidyverse` syntax previewed in SDS230's last class. The `tidyverse` is a collection of pacakges including dplyr and ggplot2 that make life easier in R.  There are enough new functions that it would not make sense to describe each function as it appears, but many of these functions are named intuitively and can be guessed from their names. We also provide extensive comments in the code.
 
-Very importantly for graders, we provide all of the data that we reference in a Github repository. The most important file is labeled "full_dt.csv" and is in the "data" folder. This has all of our cleaned data, assembled from different sources and ready to use. 
+Very importantly for graders, we provide all of the data that we reference in a Github repository. The most important file is labeled "full_dt.csv" and is in the "data" folder. This has all of our cleaned data, assembled from different sources and ready to use. It should be downloaded by the code below, but in case it is not, feel free to download it manually [here](https://github.com/18kimn/memories_of_slavery/).
+
+Finally, sometimes Rmarkdown moved our plots from the area of discussion to a few pages forward or backward to best fit the page. 
+
+# Data cleaning
 
 ## Slavery data
 
 We read in a current counties boundary shapefile. Data from NHGIS was aggregated to one observation per county, and counties in states that only had 0 for slave population (i.e. states that had outlawed slavery by 1860, which were all Northern states) were replaced with `NA` values to be excluded from the analysis. Rates were created by dividing the slave population by the total population of the county. 
 
-```{r}
-fips_shps <- readRDS("county shapefile.RDS") %>% 
+```{r, include = F}
+fips_shps <- counties() %>% 
   st_as_sf() %>% 
   mutate(fips = paste0(STATEFP, COUNTYFP)) %>% 
   select(fips)
+```
 
+```{r, eval = F}
 #aggregating total slave pop by county
-slaves <- read_csv("nhgis0002_ds14_1860_county.csv") %>% 
+slaves <- read_csv("https://github.com/18kimn/memories_of_slavery/raw/master/data/nhgis0002_ds14_1860_county.csv") %>% 
   select(GISJOIN, AH0061:AH0090) %>% 
   pivot_longer( AH0061:AH0090) %>% 
   group_by(GISJOIN) %>% 
@@ -103,7 +108,7 @@ slaves <- slaves %>%
   mutate(slave_pop = ifelse(GISJOIN %in% state_0s, NA, slave_pop)) 
 #----
 #aggregating and merging in the total population of the county
-slaves <-  read_csv("nhgis0002_ds14_1860_county.csv") %>% 
+slaves <-  read_csv("https://github.com/18kimn/memories_of_slavery/raw/master/data/nhgis0002_ds14_1860_county.csv") %>% 
   pivot_longer( AH0001:AH0180) %>% 
   group_by(GISJOIN) %>% 
   summarise(total_pop = sum(value, na.rm=T)) %>% 
@@ -111,17 +116,22 @@ slaves <-  read_csv("nhgis0002_ds14_1860_county.csv") %>%
 
 ```
 
-The most challenging part of data cleaning came from the issue of U.S. counties in 1860 being wildly different from U.S. counties in 2015. These time periods had different identifiers for each county, and we could not find a "crosswalk" online that could link these two together quickly. To address this problem, we took "centroids" in each 1860 county and observed which 2015 counties they resided in. In coding terms, I used the `st_centroid()` and `st_join()` commands in the `sf` package to map counties from these data together. Figure 1 explains this process with Virginia as an example. Code for Figure 1 is suppressed but available in the accompanying Rmarkdown file. 
+The most challenging part of data cleaning came from the issue of U.S. counties in 1860 being wildly different from U.S. counties in 2015. These time periods had different identifiers for each county, and we could not find a "crosswalk" online that could link these two together quickly. To address this problem, we took "centroids" in each 1860 county and observed which 2015 counties they resided in. In coding terms, I used the `st_centroid()` and `st_join()` commands in the `sf` package to map counties from these data together. Figure 1 explains this process with Georgia as an example. Code for Figure 1 is suppressed but available in the accompanying Rmarkdown file. 
 
 This is not an optimal solution, and the best way to approach this would have been to take block-level population data to weight overlaps between 1860 and 2015 shapefiles. We considered this too far outside of the scope of the class to be worthwhile to pursue. Figure 1 suggests our method works for the majority of counties.
 
-```{r, echo = F, fig.width = 5, fig.height = 5, fig.cap = "\\label{fig:figs} Diagram of County Overlaps and Changes for Virginia"}
-old <-  readRDS("slaves_shp1.RDS") %>% 
-  rbind(readRDS("slaves_shp2.RDS"))%>%
-  filter(STATENAM == "Georgia") %>% 
+```{r, fig.width = 5, fig.height = 5, fig.cap = "\\label{fig:figs} Diagram of County Overlaps and Changes for Georgia"}
+download.file("https://github.com/18kimn/memories_of_slavery/raw/master/data/slaves_shp1.RDS", "temp.rds", method="curl", extra = "-L")
+old <- readRDS("temp.rds") 
+
+download.file("https://github.com/18kimn/memories_of_slavery/raw/master/data/slaves_shp2.RDS", "temp.rds", method="curl", extra = "-L")
+slave_shps <- old %>% rbind(readRDS(file))
+
+old <-  slave_shps %>% 
+  filter(str_sub(GISJOIN, 2,3) == "13") %>% 
   st_transform(st_crs(fips_shps))
 
-plot <- ggplot(old) + 
+georgia <- ggplot(old) + 
   geom_sf(aes(color = "1860 Boundaries"), fill = NA) + 
   geom_sf(data = st_centroid(old), aes(color = "1860 Centroids")) + 
   geom_sf(data = filter(fips_shps, str_sub(fips,1,2) == 13), 
@@ -135,7 +145,7 @@ plot <- ggplot(old) +
         ) + 
   labs(color = "Legend")
 
-plot
+georgia
 ```
 
 We also aggregated the age- and sex-specific data on Black population rates to one observation per county. 
@@ -143,8 +153,7 @@ We also aggregated the age- and sex-specific data on Black population rates to o
 To summarise, we read in the 1860 county shapefile with `sf::st_read()`, fit the shapefile with the correct projection (i.e. calibrated the longitude-latitute coordinates to rely on the same system as my 2015 counties shapefile), transformed the data to 2015 counties as noted above, joined the shapefile with my dataset by the "GISJOIN" identifier, and aggregated 2015 counties where two or more 1860 counties had fallen into. 
 
 ```{r, eval = F}
-slaves <-  readRDS("slaves_shp1.RDS") %>% 
-  rbind(readRDS("slaves_shp2.RDS")) %>% 
+slaves <-  slave_shps %>% 
   right_join(slaves, by = "GISJOIN") %>% 
   st_centroid() %>% 
   st_transform(st_crs(fips_shps)) %>% 
@@ -240,7 +249,7 @@ rentburd <- map_dfr(urls, function(url){
 
 
 #finally, % with a college diploma and the Gini coefficient from 2000 are merged in from the County Health Rankings 2010 report, available https://www.countyhealthrankings.org/explore-health-rankings/rankings-data-documentation/national-data-documentation-2010-2017 . 
-chr <- import("data/2010 County Health Rankings National Data.xlsx", 
+chr <- import("https://github.com/18kimn/memories_of_slavery/raw/master/data/2010%20County%20Health%20Rankings%20National%20Data.xlsx", 
               sheet = 2, skip=1, col_types = "text") %>% 
   select(fips = FIPS, gini = GINI, singpar =  `% Single-Parent Households`) %>% 
   mutate_at(vars(gini:singpar), as.numeric)
@@ -268,7 +277,7 @@ dt <- slaves %>%
 #I included this chunk and set `eval=F` for all of the chunks above that scrape these data just to cut down on the time it takes to knit the document. 
 #You would get the *exact same result* if you set eval=T above and deleted this chunk. It has no functional purpose other than to save time.
 #write_csv(dt, "data/full_dt.csv")
-dt <- read_csv("full_dt.csv")
+dt <- read_csv("https://github.com/18kimn/memories_of_slavery/raw/master/data/full_dt.csv")
 ```
 
 
@@ -334,7 +343,7 @@ dt$old_prison_rate <- NULL #deleting the old prison rate because it was no longe
 
 To provide a snapshot of our categorical variables, one box plot each for `prison_type` and `urbanicity` are presented with the dependent variable being 2015 incarceration rates. Both sets of boxplots do not reveal large differences in incarceration rates between counties with different prison types and urbanicity settings, but we cannot make any definitive conclusions without further analysis. 
 
-```{r, fig.width = 6, fig.height = 3, fig.cap = "\\label{fig:prison_type_boxplot} Boxplot by Type of Prison"}
+```{r, fig.width = 6, fig.height = 3.5, fig.cap = "\\label{fig:prison_type_boxplot} Boxplot by Type of Prison"}
 boxplot(prison_rate~prison_type, data =  dt, 
         main = "Incarceration Rates by Type of Prison",
         xlab = "Presence and Type of Prison in County", 
@@ -343,7 +352,7 @@ boxplot(prison_rate~prison_type, data =  dt,
 ```
 
 
-```{r, fig.width = 6, fig.height = 3, fig.cap = "\\label{fig:urbanicity_boxplot} Boxplot by Urbanicity"}
+```{r, fig.width = 6, fig.height = 3.5, fig.cap = "\\label{fig:urbanicity_boxplot} Boxplot by Urbanicity"}
 boxplot(prison_rate~urbanicity, data =  dt, 
         main = "Incarceration Rates by Urbanicity of County",
         xlab = "Urbanicity of County", 
@@ -459,7 +468,7 @@ To explore this further, we present an ANOVA analysis, a t-test with bootstrappe
 
 ### ANOVA
 
-We first present an ANOVA analysis of all urbanicity types and their incarceration rates. From smallest to largest, these are "rural", "small/mid", "suburban", and "urban."
+We first present a plot of Tukey-corrected confidence intervals for an ANOVA analysis of all urbanicity types and their incarceration rates. From smallest to largest, these are "rural", "small/mid", "suburban", and "urban."
 
 ```{r anova, fig.width= 8, fig.height = 5,  fig.cap = "\\label{fig:tukeyanova} ANOVA of Incarceration Rate and Urbanicity, with Tukey Corrections for Confidence Intervals"}
 #mean prison rate by urbanicity
@@ -518,4 +527,4 @@ Our results have a number of assumptions and limitations.
 - Normally-distributed residuals
   - As we saw above, the residuals for the BIC-selected linear model were perfectly normally distributed. The response variable itself is only "almost" normally distributed, which may cause problems with the ANOVA assumption; however, from class we know ANOVA is fairly robust to small violations of normality and unequal variances. 
 
-Nevertheless, our results are strong evidence that slavery echoes and has effects in the modern day. Despite being one hundred and fifty years after abolition, still the age of "freedom" is yet to come.
+Nevertheless, our results are strong evidence that slavery echoes and has effects in the modern day. Despite being one hundred and fifty years after abolition,  the age of "freedom" is yet to come.
